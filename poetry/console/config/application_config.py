@@ -30,7 +30,7 @@ from poetry.console.commands.env_command import EnvCommand
 from poetry.console.commands.installer_command import InstallerCommand
 from poetry.console.logging.io_formatter import IOFormatter
 from poetry.console.logging.io_handler import IOHandler
-from poetry.utils._compat import PY36
+from poetry.mixology.solutions.providers import PythonRequirementSolutionProvider
 
 
 class ApplicationConfig(BaseApplicationConfig):
@@ -55,14 +55,9 @@ class ApplicationConfig(BaseApplicationConfig):
         self.add_event_listener(PRE_HANDLE, self.set_env)
         self.add_event_listener(PRE_HANDLE, self.set_installer)
 
-        if PY36:
-            from poetry.mixology.solutions.providers import (
-                PythonRequirementSolutionProvider,
-            )
-
-            self._solution_provider_repository.register_solution_providers(
-                [PythonRequirementSolutionProvider]
-            )
+        self._solution_provider_repository.register_solution_providers(
+            [PythonRequirementSolutionProvider]
+        )
 
     def register_command_loggers(
         self, event, event_name, _
@@ -73,7 +68,11 @@ class ApplicationConfig(BaseApplicationConfig):
 
         io = event.io
 
-        loggers = ["poetry.packages.package", "poetry.utils.password_manager"]
+        loggers = [
+            "poetry.packages.locker",
+            "poetry.packages.package",
+            "poetry.utils.password_manager",
+        ]
 
         loggers += command.loggers
 
@@ -84,9 +83,13 @@ class ApplicationConfig(BaseApplicationConfig):
             logger = logging.getLogger(logger)
 
             logger.handlers = [handler]
-            logger.propagate = False
 
             level = logging.WARNING
+            # The builders loggers are special and we can actually
+            # start at the INFO level.
+            if logger.name.startswith("poetry.core.masonry.builders"):
+                level = logging.INFO
+
             if io.is_debug():
                 level = logging.DEBUG
             elif io.is_very_verbose() or io.is_verbose():

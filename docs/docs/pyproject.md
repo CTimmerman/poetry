@@ -113,7 +113,7 @@ packages = [
 ]
 ```
 
-If your package is stored inside a "source" directory, you must specify it:
+If your package is stored inside a "lib" directory, you must specify it:
 
 ```toml
 [tool.poetry]
@@ -207,7 +207,7 @@ url = 'http://example.com/simple'
 
 ## `scripts`
 
-This section describe the scripts or executable that will be installed when installing the package
+This section describes the scripts or executables that will be installed when installing the package
 
 ```toml
 [tool.poetry.scripts]
@@ -215,6 +215,10 @@ poetry = 'poetry.console:run'
 ```
 
 Here, we will have the `poetry` script installed which will execute `console.run` in the `poetry` package.
+
+!!!note
+
+    When a script is added or updated, run `poetry install` to make them available in the project's virtualenv.
 
 ## `extras`
 

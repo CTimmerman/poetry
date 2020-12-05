@@ -2,6 +2,9 @@
 from __future__ import unicode_literals
 
 import re
+import shutil
+
+from pathlib import Path
 
 import pytest
 
@@ -15,10 +18,15 @@ from poetry.installation.operations import Install
 from poetry.installation.operations import Uninstall
 from poetry.installation.operations import Update
 from poetry.repositories.pool import Pool
-from poetry.utils._compat import PY36
-from poetry.utils._compat import Path
 from poetry.utils.env import MockEnv
 from tests.repositories.test_pypi_repository import MockRepository
+
+
+@pytest.fixture
+def env(tmp_dir):
+    path = Path(tmp_dir) / ".venv"
+    path.mkdir(parents=True)
+    return MockEnv(path=path, is_venv=True)
 
 
 @pytest.fixture()
@@ -56,36 +64,44 @@ def mock_file_downloads(http):
 
 
 def test_execute_executes_a_batch_of_operations(
-    config, pool, io, tmp_dir, mock_file_downloads
+    config, pool, io, tmp_dir, mock_file_downloads, env
 ):
     config = Config()
     config.merge({"cache-dir": tmp_dir})
 
-    env = MockEnv(path=Path(tmp_dir))
     executor = Executor(env, pool, config, io)
 
-    file_package = Package("demo", "0.1.0")
-    file_package.source_type = "file"
-    file_package.source_url = str(
-        Path(__file__)
+    file_package = Package(
+        "demo",
+        "0.1.0",
+        source_type="file",
+        source_url=Path(__file__)
         .parent.parent.joinpath(
             "fixtures/distributions/demo-0.1.0-py2.py3-none-any.whl"
         )
         .resolve()
+        .as_posix(),
     )
 
-    directory_package = Package("simple-project", "1.2.3")
-    directory_package.source_type = "directory"
-    directory_package.source_url = str(
-        Path(__file__).parent.parent.joinpath("fixtures/simple_project").resolve()
+    directory_package = Package(
+        "simple-project",
+        "1.2.3",
+        source_type="directory",
+        source_url=Path(__file__)
+        .parent.parent.joinpath("fixtures/simple_project")
+        .resolve()
+        .as_posix(),
     )
 
-    git_package = Package("demo", "0.1.0")
-    git_package.source_type = "git"
-    git_package.source_reference = "master"
-    git_package.source_url = "https://github.com/demo/demo.git"
+    git_package = Package(
+        "demo",
+        "0.1.0",
+        source_type="git",
+        source_reference="master",
+        source_url="https://github.com/demo/demo.git",
+    )
 
-    assert 0 == executor.execute(
+    return_code = executor.execute(
         [
             Install(Package("pytest", "3.5.2")),
             Uninstall(Package("attrs", "17.4.0")),
@@ -109,15 +125,20 @@ Package operations: 4 installs, 1 update, 1 removal
 """.format(
         file_package.source_url, directory_package.source_url
     )
-    assert expected == io.fetch_output()
+
+    expected = set(expected.splitlines())
+    output = set(io.fetch_output().splitlines())
+    assert expected == output
     assert 5 == len(env.executed)
+    assert 0 == return_code
 
 
-def test_execute_shows_skipped_operations_if_verbose(config, pool, io):
+def test_execute_shows_skipped_operations_if_verbose(
+    config, pool, io, config_cache_dir, env
+):
     config = Config()
-    config.merge({"cache-dir": "/foo"})
+    config.merge({"cache-dir": config_cache_dir.as_posix()})
 
-    env = MockEnv()
     executor = Executor(env, pool, config, io)
     executor.verbose()
 
@@ -134,11 +155,7 @@ Package operations: 0 installs, 0 updates, 0 removals, 1 skipped
     assert 0 == len(env.executed)
 
 
-@pytest.mark.skipif(
-    not PY36, reason="Improved error rendering is only available on Python >=3.6"
-)
-def test_execute_should_show_errors(config, mocker, io):
-    env = MockEnv()
+def test_execute_should_show_errors(config, mocker, io, env):
     executor = Executor(env, pool, config, io)
     executor.verbose()
 
@@ -160,9 +177,8 @@ Package operations: 1 install, 0 updates, 0 removals
 
 
 def test_execute_should_show_operation_as_cancelled_on_subprocess_keyboard_interrupt(
-    config, mocker, io
+    config, mocker, io, env
 ):
-    env = MockEnv()
     executor = Executor(env, pool, config, io)
     executor.verbose()
 
@@ -179,3 +195,60 @@ Package operations: 1 install, 0 updates, 0 removals
 """
 
     assert expected == io.fetch_output()
+
+
+def test_execute_should_gracefully_handle_io_error(config, mocker, io, env):
+    executor = Executor(env, pool, config, io)
+    executor.verbose()
+
+    original_write_line = executor._io.write_line
+
+    def write_line(string, flags=None):
+        # Simulate UnicodeEncodeError
+        string.encode("ascii")
+        original_write_line(string, flags)
+
+    mocker.patch.object(io, "write_line", side_effect=write_line)
+
+    assert 1 == executor.execute([Install(Package("clikit", "0.2.3"))])
+
+    expected = r"""
+Package operations: 1 install, 0 updates, 0 removals
+
+
+\s*Unicode\w+Error
+"""
+
+    assert re.match(expected, io.fetch_output())
+
+
+def test_executor_should_delete_incomplete_downloads(
+    config, io, tmp_dir, mocker, pool, mock_file_downloads, env
+):
+    fixture = Path(__file__).parent.parent.joinpath(
+        "fixtures/distributions/demo-0.1.0-py2.py3-none-any.whl"
+    )
+    destination_fixture = Path(tmp_dir) / "tomlkit-0.5.3-py2.py3-none-any.whl"
+    shutil.copyfile(str(fixture), str(destination_fixture))
+    mocker.patch(
+        "poetry.installation.executor.Executor._download_archive",
+        side_effect=Exception("Download error"),
+    )
+    mocker.patch(
+        "poetry.installation.chef.Chef.get_cached_archive_for_link",
+        side_effect=lambda link: link,
+    )
+    mocker.patch(
+        "poetry.installation.chef.Chef.get_cache_directory_for_link",
+        return_value=Path(tmp_dir),
+    )
+
+    config = Config()
+    config.merge({"cache-dir": tmp_dir})
+
+    executor = Executor(env, pool, config, io)
+
+    with pytest.raises(Exception, match="Download error"):
+        executor._download(Install(Package("tomlkit", "0.5.3")))
+
+    assert not destination_fixture.exists()

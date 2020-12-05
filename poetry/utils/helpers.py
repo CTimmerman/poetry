@@ -3,15 +3,18 @@ import re
 import shutil
 import stat
 import tempfile
+import time
 
 from contextlib import contextmanager
+from pathlib import Path
+from typing import List
 from typing import Optional
 
 import requests
 
 from poetry.config.config import Config
+from poetry.core.packages.package import Package
 from poetry.core.version import Version
-from poetry.utils._compat import Path
 
 
 try:
@@ -93,10 +96,67 @@ def download_file(
 ):  # type: (str, str, Optional[requests.Session], int) -> None
     get = requests.get if not session else session.get
 
-    with get(url, stream=True) as response:
-        response.raise_for_status()
+    resume_byte_pos = 0
+    mtime = None
+    try:
+        resume_byte_pos = os.path.getsize(dest)
+        mtime = os.path.getmtime(dest)
+    except Exception:
+        pass
 
-        with open(dest, "wb") as f:
+    headers = {}
+    if resume_byte_pos:
+        headers.update(Range="bytes=%d-" % resume_byte_pos)
+        if mtime:
+            headers.update(
+                {
+                    "If-Unmodified-Since": time.strftime(
+                        "%a, %d %b %Y %H:%M:%S GMT", time.gmtime(mtime)
+                    )
+                }
+            )
+
+    with get(url, headers=headers, stream=True) as response:
+        response.raise_for_status()
+        if response.status_code == 206:
+            mode = "ab"
+        elif response.status_code == 200:
+            mode = "wb"
+        else:
+            raise Exception("Unexpected HTTP status in", response)
+
+        with open(dest, mode) as f:
             for chunk in response.iter_content(chunk_size=chunk_size):
                 if chunk:
                     f.write(chunk)
+
+
+def get_package_version_display_string(
+    package, root=None
+):  # type: (Package, Optional[Path]) -> str
+    if package.source_type in ["file", "directory"] and root:
+        return "{} {}".format(
+            package.version,
+            Path(os.path.relpath(package.source_url, root.as_posix())).as_posix(),
+        )
+
+    return package.full_pretty_version
+
+
+def paths_csv(paths):  # type: (List[Path]) -> str
+    return ", ".join('"{}"'.format(str(c)) for c in paths)
+
+
+def is_dir_writable(path, create=False):  # type: (Path, bool) -> bool
+    try:
+        if not path.exists():
+            if not create:
+                return False
+            path.mkdir(parents=True, exist_ok=True)
+
+        with tempfile.TemporaryFile(dir=str(path)):
+            pass
+    except (IOError, OSError):
+        return False
+    else:
+        return True

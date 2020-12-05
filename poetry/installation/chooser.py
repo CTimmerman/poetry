@@ -4,6 +4,7 @@ from typing import List
 from typing import Tuple
 
 from packaging.tags import Tag
+
 from poetry.core.packages.package import Package
 from poetry.core.packages.utils.link import Link
 from poetry.repositories.pool import Pool
@@ -62,7 +63,7 @@ class Chooser:
             ):
                 continue
 
-            if link.ext == ".egg":
+            if link.ext in {".egg", ".exe", ".msi", ".rpm", ".srpm"}:
                 continue
 
             links.append(link)

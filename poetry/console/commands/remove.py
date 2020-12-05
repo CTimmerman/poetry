@@ -25,7 +25,7 @@ list of installed packages
 
 <info>poetry remove</info>"""
 
-    loggers = ["poetry.repositories.pypi_repository"]
+    loggers = ["poetry.repositories.pypi_repository", "poetry.inspection.info"]
 
     def handle(self):
         packages = self.argument("packages")
@@ -60,7 +60,6 @@ list of installed packages
         # Update packages
         self.reset_poetry()
 
-        self._installer.set_package(self.poetry.package)
         self._installer.use_executor(
             self.poetry.config.get("experimental.new-installer", False)
         )

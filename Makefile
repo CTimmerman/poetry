@@ -49,7 +49,7 @@ wheel:
 linux_release:
 	docker pull quay.io/pypa/manylinux2010_x86_64
 	docker run --rm -i -v `pwd`:/io \
-		-e PYTHON=/opt/python/cp37-cp37m/bin/python \
+		-e PYTHON=/opt/python/cp38-cp38/bin/python \
 		-e PYTHON27=/opt/python/cp27-cp27m/bin/python \
 		-e PYTHON35=/opt/python/cp35-cp35m/bin/python \
 		-e PYTHON36=/opt/python/cp36-cp36m/bin/python \

@@ -1,10 +1,10 @@
 import hashlib
 import json
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from poetry.core.packages.utils.link import Link
-from poetry.utils._compat import Path
 
 from .chooser import InvalidWheelName
 from .chooser import Wheel
@@ -81,7 +81,7 @@ class Chef:
         links = []
         for archive_type in archive_types:
             for archive in cache_dir.glob("*.{}".format(archive_type)):
-                links.append(Link("file://{}".format(str(archive))))
+                links.append(Link(archive.as_uri()))
 
         return links
 
